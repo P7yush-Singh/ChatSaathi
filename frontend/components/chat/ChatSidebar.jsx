@@ -29,6 +29,9 @@ export default function ChatSidebar() {
   const [searchText, setSearchText] = useState("");
   const [searchResults, setSearchResults] = useState([]); // messages
 
+  // small dropdown for New button
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+
   async function loadConversations() {
     try {
       setLoading(true);
@@ -36,7 +39,6 @@ export default function ChatSidebar() {
       const data = await apiRequest("/api/conversations");
       setConversations(data);
 
-      // join all rooms for real-time updates
       const s = connectSocket();
       if (s) {
         data.forEach((c) => {
@@ -72,10 +74,10 @@ export default function ChatSidebar() {
           : msg.sender?._id?.toString();
 
       if (!convoId || !user) return;
-      if (senderId === user.id || senderId === user._id) return; // ignore own
+      if (senderId === user.id || senderId === user._id) return;
 
       const currentPath = `/chat/${convoId}`;
-      if (pathname === currentPath) return; // already viewing
+      if (pathname === currentPath) return;
 
       setUnreadCounts((prev) => {
         const current = prev[convoId] || 0;
@@ -89,8 +91,10 @@ export default function ChatSidebar() {
     };
   }, [user, pathname]);
 
-  // NEW CHAT button
-  async function handleNewChat() {
+  // ---------- NEW CHAT / GROUP CREATION ---------- //
+
+  // Direct message via username
+  async function handleNewDM() {
     const username = prompt("Enter username to start chat (without @):");
     if (!username) return;
 
@@ -101,6 +105,35 @@ export default function ChatSidebar() {
       });
 
       await loadConversations();
+      setNewMenuOpen(false);
+      router.push(`/chat/${convo._id}`);
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  // New group via group name + usernames
+  async function handleNewGroup() {
+    const name = prompt("Enter group name:");
+    if (!name) return;
+
+    const usernamesStr = prompt(
+      "Enter usernames to add (comma separated, without @):"
+    );
+    const usernames =
+      usernamesStr
+        ?.split(",")
+        .map((u) => u.trim())
+        .filter(Boolean) || [];
+
+    try {
+      const convo = await apiRequest("/api/conversations/group", {
+        method: "POST",
+        body: JSON.stringify({ name, usernames }),
+      });
+
+      await loadConversations();
+      setNewMenuOpen(false);
       router.push(`/chat/${convo._id}`);
     } catch (err) {
       alert(err.message);
@@ -116,7 +149,8 @@ export default function ChatSidebar() {
     });
   }
 
-  // 🔍 handle search
+  // ---------- SEARCH ---------- //
+
   async function handleSearch(e) {
     e.preventDefault();
     const q = searchText.trim();
@@ -124,7 +158,7 @@ export default function ChatSidebar() {
 
     if (!q) return;
 
-    // If user types @username → open / create DM
+    // @username → DM
     if (q.startsWith("@")) {
       const username = q.slice(1);
       if (!username) return;
@@ -144,7 +178,7 @@ export default function ChatSidebar() {
       return;
     }
 
-    // Otherwise search messages
+    // normal text → message search
     try {
       const results = await apiRequest(
         `/api/search/messages?q=${encodeURIComponent(q)}`
@@ -159,21 +193,40 @@ export default function ChatSidebar() {
   return (
     <div className="flex flex-col h-full">
       {/* top bar */}
-      <div className="px-4 py-3 bg-[#202c33] border-b border-[#2a3942] flex items-center justify-between">
+      <div className="px-4 py-3 bg-[#202c33] border-b border-[#2a3942] flex items-center justify-between relative">
         <h3 className="text-white font-semibold text-sm">Chats</h3>
-        <button
-          className="text-xs px-2 py-1 rounded-md bg-[#111b21] border border-[#2a3942] text-slate-200 hover:bg-[#1f2c33]"
-          onClick={handleNewChat}
-        >
-          New
-        </button>
+
+        <div className="relative">
+          <button
+            className="text-xs px-2 py-1 rounded-md bg-[#111b21] border border-[#2a3942] text-slate-200 hover:bg-[#1f2c33]"
+            onClick={() => setNewMenuOpen((v) => !v)}
+          >
+            New
+          </button>
+
+          {newMenuOpen && (
+            <div className="absolute right-0 mt-2 w-40 bg-[#202c33] border border-[#2a3942] rounded-xl shadow-xl z-30 text-xs text-slate-100">
+              <button
+                type="button"
+                onClick={handleNewDM}
+                className="block w-full text-left px-3 py-2 hover:bg-[#2a3942]"
+              >
+                New direct chat
+              </button>
+              <button
+                type="button"
+                onClick={handleNewGroup}
+                className="block w-full text-left px-3 py-2 hover:bg-[#2a3942]"
+              >
+                New group
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* search */}
-      <form
-        onSubmit={handleSearch}
-        className="p-3 bg-[#111b21] relative"
-      >
+      <form onSubmit={handleSearch} className="p-3 bg-[#111b21] relative">
         <input
           placeholder="Search messages or @username"
           className="w-full px-4 py-2 rounded-full bg-[#202c33] text-sm text-slate-200 outline-none"
@@ -181,7 +234,6 @@ export default function ChatSidebar() {
           onChange={(e) => setSearchText(e.target.value)}
         />
 
-        {/* Search results dropdown */}
         {searchResults.length > 0 && (
           <div className="absolute left-3 right-3 mt-2 max-h-64 overflow-y-auto bg-[#202c33] border border-[#2a3942] rounded-xl shadow-xl z-20">
             {searchResults.map((msg) => {
@@ -189,13 +241,12 @@ export default function ChatSidebar() {
                 typeof msg.conversation === "string"
                   ? msg.conversation
                   : msg.conversation?._id;
-              const convoName =
-                msg.conversation?.name ||
-                "Chat";
+              const convoName = msg.conversation?.name || "Chat";
 
-              const preview = msg.text.length > 40
-                ? msg.text.slice(0, 40) + "…"
-                : msg.text;
+              const preview =
+                msg.text.length > 40
+                  ? msg.text.slice(0, 40) + "…"
+                  : msg.text;
 
               return (
                 <button

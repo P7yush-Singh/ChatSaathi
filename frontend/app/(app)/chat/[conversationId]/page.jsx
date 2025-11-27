@@ -46,7 +46,7 @@ export default function ConversationPage() {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // header info: name + avatar + type + dm other user id
+  // header/meta
   const [header, setHeader] = useState({
     title: "",
     avatar: "/avatars/user1.png",
@@ -61,7 +61,14 @@ export default function ConversationPage() {
     lastSeen: null,
   });
 
-  // 1) Load conversation meta (so header shows username / group name)
+  // group UI state
+  const [groupMenuOpen, setGroupMenuOpen] = useState(false);
+  const [groupPanelOpen, setGroupPanelOpen] = useState(false);
+  const [groupNameInput, setGroupNameInput] = useState("");
+  const [addMembersInput, setAddMembersInput] = useState("");
+  const [groupSaving, setGroupSaving] = useState(false);
+
+  // ---------- 1) Load conversation meta (name, type, admins) ----------
   useEffect(() => {
     async function loadConversationMeta() {
       if (!convoId || !user) return;
@@ -90,14 +97,14 @@ export default function ConversationPage() {
             isAdmin: false,
           });
         } else {
-          const adminIds = (convo.admins || []).map((a) =>
-            a.toString ? a.toString() : a
-          );
-          const isAdminHere =
-            user &&
-            adminIds.some(
-              (id) => id === user.id || id === user._id
-            );
+          // admins might be populated docs OR plain ids
+          const adminIds = (convo.admins || []).map((a) => {
+            if (a && a._id) return a._id.toString();
+            return a.toString();
+          });
+
+          const myId = user.id || user._id;
+          const isAdminHere = adminIds.includes(myId.toString());
 
           setHeader({
             title: convo.name || "Group",
@@ -106,6 +113,8 @@ export default function ConversationPage() {
             otherUserId: null,
             isAdmin: isAdminHere,
           });
+
+          setGroupNameInput(convo.name || "");
         }
       } catch (err) {
         console.error("Load conversation meta error:", err);
@@ -120,7 +129,7 @@ export default function ConversationPage() {
     loadConversationMeta();
   }, [convoId, user]);
 
-  // 2) Load initial messages
+  // ---------- 2) Load initial messages ----------
   useEffect(() => {
     async function loadMessages() {
       if (!convoId) return;
@@ -169,7 +178,7 @@ export default function ConversationPage() {
     loadMessages();
   }, [convoId, user]);
 
-  // 3) Mark conversation as read when messages are loaded
+  // ---------- 3) Mark conversation as read ----------
   useEffect(() => {
     async function markRead() {
       if (!convoId || messages.length === 0) return;
@@ -188,7 +197,7 @@ export default function ConversationPage() {
     }
   }, [loading, messages.length, convoId]);
 
-  // 4) Socket: join room + listen for realtime events
+  // ---------- 4) Socket: realtime + presence ----------
   useEffect(() => {
     if (!convoId) return;
 
@@ -246,7 +255,6 @@ export default function ConversationPage() {
 
     function handleRead({ conversationId, userId: uid }) {
       if (conversationId !== convoId) return;
-      // If OTHER user read, mark my messages as read
       if (!user || uid === user.id || uid === user._id) return;
 
       console.log("conversation:read received for convo", conversationId);
@@ -259,7 +267,16 @@ export default function ConversationPage() {
     }
 
     function handlePresence({ userId: uid, online, lastSeen }) {
-      // For DM, only track presence of the OTHER user
+      if (
+        header.type === "dm" &&
+        header.otherUserId &&
+        uid === header.otherUserId
+      ) {
+        setPresence({ online, lastSeen });
+      }
+    }
+
+    function handlePresenceState({ userId: uid, online, lastSeen }) {
       if (
         header.type === "dm" &&
         header.otherUserId &&
@@ -274,6 +291,11 @@ export default function ConversationPage() {
     socket.on("typing:stop", handleTypingStop);
     socket.on("conversation:read", handleRead);
     socket.on("user:presence", handlePresence);
+    socket.on("presence:state", handlePresenceState);
+
+    if (header.type === "dm" && header.otherUserId) {
+      socket.emit("presence:check", { userId: header.otherUserId });
+    }
 
     return () => {
       socket.off("message:new", handleNewMessage);
@@ -281,6 +303,7 @@ export default function ConversationPage() {
       socket.off("typing:stop", handleTypingStop);
       socket.off("conversation:read", handleRead);
       socket.off("user:presence", handlePresence);
+      socket.off("presence:state", handlePresenceState);
     };
   }, [convoId, user, header.type, header.otherUserId]);
 
@@ -294,6 +317,105 @@ export default function ConversationPage() {
         ? `last seen at ${formatTime(presence.lastSeen)}`
         : "last seen recently"
       : "group";
+
+  // ---------- GROUP ADMIN ACTIONS ---------- //
+
+  async function handleRenameGroup() {
+    if (header.type !== "group" || !header.isAdmin) return;
+    if (!groupNameInput.trim()) return;
+
+    try {
+      setGroupSaving(true);
+      const updated = await apiRequest(
+        `/api/conversations/${convoId}/group-name`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ name: groupNameInput.trim() }),
+        }
+      );
+      setHeader((prev) => ({
+        ...prev,
+        title: updated.name || groupNameInput.trim(),
+      }));
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setGroupSaving(false);
+    }
+  }
+
+  async function handleAddMembers() {
+    if (header.type !== "group" || !header.isAdmin) return;
+
+    const usernames = addMembersInput
+      .split(",")
+      .map((u) => u.trim())
+      .filter(Boolean);
+
+    if (!usernames.length) return;
+
+    try {
+      setGroupSaving(true);
+      await apiRequest(`/api/conversations/${convoId}/members/add`, {
+        method: "POST",
+        body: JSON.stringify({ usernames }),
+      });
+      setAddMembersInput("");
+      alert("Members added");
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setGroupSaving(false);
+    }
+  }
+
+  async function handleRemoveMember() {
+    if (header.type !== "group" || !header.isAdmin) return;
+    const username = prompt("Username to remove (without @):");
+    if (!username) return;
+
+    try {
+      await apiRequest(`/api/conversations/${convoId}/members/remove`, {
+        method: "POST",
+        body: JSON.stringify({ username }),
+      });
+      alert("Member removed");
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function handleMakeAdmin() {
+    if (header.type !== "group" || !header.isAdmin) return;
+    const username = prompt("Username to make admin (without @):");
+    if (!username) return;
+
+    try {
+      await apiRequest(`/api/conversations/${convoId}/admins/add`, {
+        method: "POST",
+        body: JSON.stringify({ username }),
+      });
+      alert("User is now admin");
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function handleRemoveAdmin() {
+    if (header.type !== "group" || !header.isAdmin) return;
+    const username = prompt("Username to remove admin (without @):");
+    if (!username) return;
+
+    try {
+      await apiRequest(`/api/conversations/${convoId}/admins/remove`, {
+        method: "POST",
+        body: JSON.stringify({ username }),
+      });
+      alert("Admin role removed");
+    } catch (err) {
+      alert(err.message);
+    }
+  }
 
   return (
     <div
@@ -337,12 +459,116 @@ export default function ConversationPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 text-slate-300 text-lg">
-          {/* later we'll add group settings button when header.type === 'group' && header.isAdmin */}
+        <div className="relative flex items-center gap-2 text-slate-300 text-lg">
           <button className="hidden md:block">🔍</button>
-          <button>⋮</button>
+
+          <button
+            onClick={() => {
+              setGroupMenuOpen((v) => !v);
+            }}
+            className="px-1"
+          >
+            ⋮
+          </button>
+
+          {header.type === "group" && header.isAdmin && groupMenuOpen && (
+            <div className="absolute right-0 top-8 w-48 bg-[#202c33] border border-[#2a3942] rounded-xl shadow-xl text-xs z-40">
+              <button
+                type="button"
+                onClick={() => {
+                  setGroupPanelOpen(true);
+                  setGroupMenuOpen(false);
+                }}
+                className="block w-full text-left px-3 py-2 hover:bg-[#2a3942] text-slate-100"
+              >
+                Group settings
+              </button>
+              <button
+                type="button"
+                onClick={handleRemoveMember}
+                className="block w-full text-left px-3 py-2 hover:bg-[#2a3942] text-red-300"
+              >
+                Remove member
+              </button>
+              <button
+                type="button"
+                onClick={handleMakeAdmin}
+                className="block w-full text-left px-3 py-2 hover:bg-[#2a3942] text-slate-100"
+              >
+                Make admin
+              </button>
+              <button
+                type="button"
+                onClick={handleRemoveAdmin}
+                className="block w-full text-left px-3 py-2 hover:bg-[#2a3942] text-red-300"
+              >
+                Remove admin
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* NICE GROUP SETTINGS PANEL (rename + add members) */}
+      {header.type === "group" && header.isAdmin && groupPanelOpen && (
+        <div className="border-b border-[#2a3942] bg-[#111b21] px-4 py-3 text-xs text-slate-100 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-[11px] uppercase tracking-wide text-slate-300">
+              Group settings
+            </span>
+            <button
+              className="text-[11px] text-slate-400 hover:text-slate-200"
+              onClick={() => setGroupPanelOpen(false)}
+            >
+              Close ✕
+            </button>
+          </div>
+
+          {/* Rename */}
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] text-slate-400">
+              Group name
+            </label>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 px-3 py-1 rounded-lg bg-[#202c33] text-xs text-slate-100 outline-none border border-[#2a3942]"
+                value={groupNameInput}
+                onChange={(e) => setGroupNameInput(e.target.value)}
+                placeholder="Enter group name"
+              />
+              <button
+                onClick={handleRenameGroup}
+                disabled={groupSaving}
+                className="px-3 py-1 rounded-lg bg-emerald-500 text-black text-[11px] font-semibold hover:bg-emerald-400 disabled:opacity-60"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+
+          {/* Add members */}
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] text-slate-400">
+              Add members (comma separated usernames, without @)
+            </label>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 px-3 py-1 rounded-lg bg-[#202c33] text-xs text-slate-100 outline-none border border-[#2a3942]"
+                value={addMembersInput}
+                onChange={(e) => setAddMembersInput(e.target.value)}
+                placeholder="punit, rahul, someone"
+              />
+              <button
+                onClick={handleAddMembers}
+                disabled={groupSaving}
+                className="px-3 py-1 rounded-lg bg-sky-500 text-black text-[11px] font-semibold hover:bg-sky-400 disabled:opacity-60"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MESSAGES */}
       {loading ? (

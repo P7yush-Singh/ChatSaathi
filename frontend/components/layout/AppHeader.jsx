@@ -51,7 +51,7 @@ export default function AppHeader() {
           <span className="text-xs text-slate-400">Checking...</span>
         ) : user ? (
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
+            <Link href="/profile" className="flex items-center gap-2">
               <div className="relative w-8 h-8">
                 <Image
                   src={user.avatarUrl || "/avatars/user1.png"}
@@ -68,7 +68,7 @@ export default function AppHeader() {
                   @{user.username}
                 </span>
               </div>
-            </div>
+            </Link>
 
             <button
               onClick={logout}
