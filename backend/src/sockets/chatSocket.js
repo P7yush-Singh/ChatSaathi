@@ -1,11 +1,12 @@
 // src/sockets/chatSocket.js
 import { Message } from "../models/Message.js";
 import { Conversation } from "../models/Conversation.js";
-import { User } from "../models/User.js";       // ✅ FIX: import User
+import { User } from "../models/User.js";
 import jwt from "jsonwebtoken";
 
 export function registerChatHandlers(io) {
-  const onlineUsers = new Map(); // userId -> socketId
+  // userId (string) -> socketId
+  const onlineUsers = new Map();
 
   // Socket auth middleware
   io.use((socket, next) => {
@@ -22,12 +23,12 @@ export function registerChatHandlers(io) {
   });
 
   io.on("connection", (socket) => {
-    const userId = socket.userId;
+    const userId = socket.userId?.toString();
 
     // Track online user
     onlineUsers.set(userId, socket.id);
 
-    // Send full online list + this user's presence
+    // Broadcast full online list + this user's presence
     io.emit("user:online:list", Array.from(onlineUsers.keys()));
     io.emit("user:presence", {
       userId,
@@ -41,7 +42,7 @@ export function registerChatHandlers(io) {
       socket.join(conversationId);
     });
 
-    // ✅ Typing start
+    // Typing start
     socket.on("typing:start", ({ conversationId }) => {
       if (!conversationId) return;
       socket.to(conversationId).emit("typing:start", {
@@ -50,7 +51,7 @@ export function registerChatHandlers(io) {
       });
     });
 
-    // ✅ Typing stop
+    // Typing stop
     socket.on("typing:stop", ({ conversationId }) => {
       if (!conversationId) return;
       socket.to(conversationId).emit("typing:stop", {
@@ -59,7 +60,31 @@ export function registerChatHandlers(io) {
       });
     });
 
-    // ✅ New message (real-time)
+    // ✅ Presence check (for tabs that mount later)
+    socket.on("presence:check", async ({ userId: targetId }) => {
+      try {
+        if (!targetId) return;
+
+        const key = targetId.toString();
+        const isOnline = onlineUsers.has(key);
+
+        let lastSeen = null;
+        if (!isOnline) {
+          const userDoc = await User.findById(targetId).select("lastSeen");
+          lastSeen = userDoc?.lastSeen || null;
+        }
+
+        socket.emit("presence:state", {
+          userId: targetId,
+          online: isOnline,
+          lastSeen,
+        });
+      } catch (err) {
+        console.error("presence:check error:", err.message);
+      }
+    });
+
+    // New message (real-time)
     socket.on("message:new", async ({ conversationId, text }) => {
       try {
         if (!conversationId || !text) return;
@@ -68,7 +93,7 @@ export function registerChatHandlers(io) {
           conversation: conversationId,
           sender: userId,
           text,
-          readBy: [userId],
+          readBy: [userId], // sender has read it
         });
 
         await Conversation.findByIdAndUpdate(conversationId, {
@@ -87,7 +112,7 @@ export function registerChatHandlers(io) {
       }
     });
 
-    // ✅ Disconnect: update lastSeen + broadcast presence
+    // Disconnect: update lastSeen + broadcast presence
     socket.on("disconnect", async () => {
       onlineUsers.delete(userId);
       io.emit("user:online:list", Array.from(onlineUsers.keys()));

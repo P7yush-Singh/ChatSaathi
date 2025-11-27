@@ -13,6 +13,7 @@ import { registerChatHandlers } from "./sockets/chatSocket.js";
 import { messageModifyRouter } from "./routes/message.modify.routes.js";
 import { searchRouter } from "./routes/search.routes.js";
 import { readRouter } from "./routes/read.routes.js"; // ✅ added
+import { profileRouter } from "./routes/profile.routes.js";
 
 const PORT = process.env.PORT || 4000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
@@ -52,6 +53,7 @@ async function start() {
   app.use("/api/messages", messageModifyRouter);   // /:id edit/delete
   app.use("/api/read", readRouter);                // ✅ mark-as-read
   app.use("/api/search", searchRouter);
+  app.use("/api/profile", profileRouter);
 
   // Socket handlers
   registerChatHandlers(io);

@@ -1,17 +1,42 @@
 // src/models/User.js
 import mongoose from "mongoose";
+const { Schema } = mongoose;
 
-const userSchema = new mongoose.Schema(
+const userSchema = new Schema(
   {
-    displayName: { type: String, required: true },
-    username: { type: String, required: true, unique: true, lowercase: true },
-    email: { type: String, required: true, unique: true, lowercase: true },
-    passwordHash: { type: String, required: true },
-    avatarUrl: { type: String },
-    isVerified: { type: Boolean, default: false }, // later use OTP
-    lastSeen: { type: Date, default: Date.now }
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+    passwordHash: {
+      type: String,
+    },
+    displayName: {
+      type: String,
+      trim: true,
+    },
+    username: {
+      type: String,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+    usernameLastChanged: {
+      type: Date,
+      default: Date.now, // treat signup as first set
+    },
+    avatarUrl: {
+      type: String,
+    },
+    lastSeen: {
+      type: Date,
+    },
+    // ... any other fields you already had
   },
   { timestamps: true }
 );
 
-export const User = mongoose.models.User || mongoose.model("User", userSchema);
+export const User = mongoose.model("User", userSchema);
