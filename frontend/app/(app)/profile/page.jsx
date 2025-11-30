@@ -6,14 +6,8 @@ import Image from "next/image";
 import { apiRequest } from "@/lib/apiClient";
 import { useAuth } from "@/hooks/useAuth";
 
-function formatNextChange(dateStr) {
-  if (!dateStr) return "";
-  const d = new Date(dateStr);
-  return d.toLocaleString();
-}
-
 export default function ProfilePage() {
-  const { user, refreshUser } = useAuth(); // assuming you have refreshUser or can re-fetch /me
+  const { user, refreshUser } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -48,13 +42,12 @@ export default function ProfilePage() {
   async function handleSaveProfile() {
     try {
       setSaving(true);
-      await apiRequest("/api/profile", {
+      const updated = await apiRequest("/api/profile", {
         method: "PATCH",
         body: JSON.stringify({ displayName }),
       });
 
-      // username change handled separately
-      setProfile((prev) => ({ ...prev, displayName }));
+      setProfile((prev) => ({ ...prev, ...updated }));
       if (refreshUser) refreshUser();
     } catch (err) {
       alert(err.message);
@@ -99,7 +92,7 @@ export default function ProfilePage() {
     setAvatarPreview(url);
   }
 
-  // ✅ FIXED: read the real JWT token from localStorage and send it
+  // 🔥 Upload to /api/upload (Cloudinary), then PATCH /api/profile with avatarUrl
   async function handleUploadAvatar(e) {
     e.preventDefault();
     if (!avatarFile) {
@@ -109,40 +102,30 @@ export default function ProfilePage() {
 
     try {
       setAvatarSaving(true);
+
+      // 1) upload file to Next.js API route → Cloudinary
       const formData = new FormData();
-      formData.append("avatar", avatarFile);
+      formData.append("file", avatarFile);
 
-      // IMPORTANT:
-      // Use the SAME key you already use for login/socket/api.
-      // I'm using "chat_saathi_token" — if your key is different, change it here.
-      const token =
-        typeof window !== "undefined"
-          ? localStorage.getItem("chat_saathi_token")
-          : null;
+      const uploadRes = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
 
-      const res = await fetch(
-        `${
-          process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000"
-        }/api/profile/avatar`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: token
-            ? {
-                Authorization: `Bearer ${token}`,
-              }
-            : {},
-          body: formData,
-        }
-      );
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+      if (!uploadRes.ok) {
+        const err = await uploadRes.json().catch(() => ({}));
         throw new Error(err.message || "Upload failed");
       }
 
-      const data = await res.json();
-      setProfile(data);
+      const { url } = await uploadRes.json();
+
+      // 2) save avatarUrl in backend via /api/profile
+      const updated = await apiRequest("/api/profile", {
+        method: "PATCH",
+        body: JSON.stringify({ avatarUrl: url }),
+      });
+
+      setProfile((prev) => ({ ...prev, ...updated }));
       setAvatarPreview(null);
       setAvatarFile(null);
       if (refreshUser) refreshUser();
@@ -174,9 +157,7 @@ export default function ProfilePage() {
   return (
     <div className="min-h-[calc(100vh-64px)] bg-[#0b141a] flex justify-center py-8 px-4">
       <div className="w-full max-w-3xl bg-[#111b21] border border-[#202c33] rounded-2xl shadow-xl p-6 md:p-8 text-slate-100 flex flex-col gap-6">
-        <h1 className="text-xl md:text-2xl font-semibold mb-2">
-          Profile
-        </h1>
+        <h1 className="text-xl md:text-2xl font-semibold mb-2">Profile</h1>
 
         {/* TOP: avatar + email */}
         <div className="flex flex-col md:flex-row gap-6 items-center md:items-start">
@@ -250,9 +231,9 @@ export default function ProfilePage() {
           <h2 className="text-sm font-semibold mb-2 text-slate-200">
             Username
           </h2>
-        <p className="text-[11px] text-slate-400 mb-2">
-            Your unique username is used for search and friend requests.
-            You can change it once every 14 days.
+          <p className="text-[11px] text-slate-400 mb-2">
+            Your unique username is used for search and friend requests. You can
+            change it once every 14 days.
           </p>
 
           <div className="flex flex-col md:flex-row gap-3 md:items-center">
@@ -274,9 +255,7 @@ export default function ProfilePage() {
           </div>
 
           {usernameError && (
-            <p className="text-[11px] text-red-400 mt-1">
-              {usernameError}
-            </p>
+            <p className="text-[11px] text-red-400 mt-1">{usernameError}</p>
           )}
           {usernameMessage && (
             <p className="text-[11px] text-emerald-400 mt-1">

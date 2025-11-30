@@ -1,6 +1,7 @@
+// app/layout.js (server component)
 import "./globals.css";
 import AppHeader from "@/components/layout/AppHeader";
-import { AuthProvider } from "@/hooks/useAuth";
+import Providers from "./providers";
 
 export const metadata = {
   title: "Chat Saathi",
@@ -11,12 +12,12 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className="min-h-screen bg-[#0d1b1f] text-slate-100">
-        <AuthProvider>
+        <Providers>
           <div className="max-w-7xl mx-auto px-6 py-5">
             <AppHeader />
-            <main>{children}</main>
+            {children}
           </div>
-        </AuthProvider>
+        </Providers>
       </body>
     </html>
   );

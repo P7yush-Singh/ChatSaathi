@@ -1,4 +1,5 @@
 // app/page.jsx
+import Image from "next/image";
 import Link from "next/link";
 
 export default function HomePage() {
@@ -58,7 +59,7 @@ export default function HomePage() {
           {/* messages */}
           <div className="space-y-3 text-sm">
             <div className="flex items-start gap-2">
-              <div className="w-8 h-8 rounded-full bg-slate-700" />
+                <Image src="/avatars/aanchal.png" width={32} height={32} alt="Aanchal Avatar" className="w-8 h-8 rounded-full bg-slate-700" />
               <div>
                 <p className="font-medium text-slate-100 text-xs">Aanchal</p>
                 <p className="text-slate-300 bg-slate-800/70 rounded-2xl rounded-tl-sm px-3 py-2 inline-block">
@@ -74,7 +75,7 @@ export default function HomePage() {
                   Let&apos;s build this real-time app from scratch 💻
                 </p>
               </div>
-              <div className="w-8 h-8 rounded-full bg-emerald-500" />
+              <Image src="/avatars/user1.png" width={32} height={32} alt="Your Avatar" className="w-8 h-8 rounded-full bg-slate-700" />
             </div>
 
             <p className="text-[11px] text-slate-500 pt-2 border-t border-slate-800 mt-3">
